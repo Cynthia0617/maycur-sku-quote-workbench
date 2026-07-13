@@ -1,0 +1,10 @@
+{
+  "name": "maycur-sku-quote-workbench",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "mkdir -p dist && cp -R assets data index.html styles.css app.js README.md dist/"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>报价问答工作台 MVP</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="hero">
+        <div class="hero-content">
+          <div class="hero-actions">
+            <span class="product-badge">
+              <span class="badge-icon app-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M5 5h14v14H5z" />
+                  <path d="M8 5v14M12 5v14M16 5v14" />
+                  <path d="M5 9h14M5 15h14" />
+                </svg>
+              </span>
+              商务报价助手
+            </span>
+          </div>
+          <h1>每刻SKU报价智能工作台</h1>
+          <p class="hero-subtitle">
+            先用产品线、部署模式和关键词限定 SKU 范围，再基于客户场景自动推荐可能需要的报价项。
+          </p>
+          <div class="hero-features">
+            <div>
+              <span class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M13 3 5 14h6l-1 7 9-12h-6l1-6z" />
+                  <path d="M4 19h5M15 19h5" />
+                </svg>
+              </span>
+              <strong>SKU 查询</strong><small>限定报价范围</small>
+            </div>
+            <div>
+              <span class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M12 4a8 8 0 1 0 8 8" />
+                  <path d="M19 4v6h-6" />
+                  <path d="M12 8v4l3 2" />
+                  <circle cx="12" cy="12" r="1.6" />
+                </svg>
+              </span>
+              <strong>场景问答</strong><small>语义推荐 SKU</small>
+            </div>
+            <div>
+              <span class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M5 5h14v14H5z" />
+                  <path d="M8 5v14M12 5v14M16 5v14" />
+                  <path d="M5 9h14M5 15h14" />
+                </svg>
+              </span>
+              <strong>规则提示</strong><small>审批询价不漏项</small>
+            </div>
+            <div>
+              <span class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M7 4h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
+                  <path d="M8 8h8M8 12h4" />
+                  <path d="m9 16 2 2 4-5" />
+                </svg>
+              </span>
+              <strong>草稿试算</strong><small>数量周期可调整</small>
+            </div>
+          </div>
+        </div>
+        <div class="hero-visual" aria-label="每小刻报价助手封面图">
+          <div class="hero-cover-frame">
+            <img class="hero-cover" src="./assets/hero-maycur-cover.png" alt="每小刻报价助手封面图" />
+          </div>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="panel combined-panel">
+          <div class="panel-header">
+            <div>
+              <h2>SKU 查询与报价问答</h2>
+              <p>上方筛选标准报价项，下方基于当前筛选范围咨询客户场景并推荐 SKU</p>
+            </div>
+            <button class="ghost-button" id="clearFilters" type="button">清空筛选</button>
+          </div>
+
+          <div class="query-section">
+            <div class="section-title">
+              <strong>SKU 查询</strong>
+              <span>按产品线、部署模式、关键字筛选标准报价项</span>
+            </div>
+            <div class="filters compact-filters">
+              <label>
+                <span>公司级产品线</span>
+                <select id="companyLineFilter"></select>
+              </label>
+              <label>
+                <span>部署模式</span>
+                <select id="deploymentFilter">
+                  <option value="">全部</option>
+                  <option value="saas">SaaS 云部署</option>
+                  <option value="local">本地部署</option>
+                </select>
+              </label>
+              <label class="keyword-filter">
+                <span>关键词</span>
+                <input id="searchInput" type="search" placeholder="SKU 名称、编码、SPU、说明..." />
+              </label>
+            </div>
+
+            <div class="scope-bar">
+              <div>
+                当前筛选范围：<strong id="resultCount">0</strong>
+                <span>条 SKU，将用于下方问答助手推荐</span>
+              </div>
+              <button class="ghost-button scope-toggle" id="toggleScopeResults" type="button">
+                展开查看 SKU
+              </button>
+            </div>
+            <div class="sku-list is-hidden" id="skuList"></div>
+          </div>
+
+          <div class="assistant-section">
+            <div class="section-title">
+              <strong>报价问答助手</strong>
+              <span>结合当前筛选条件，输入客户场景并推荐报价 SKU</span>
+            </div>
+            <textarea id="scenarioInput" rows="6" placeholder="例如：客户要做出海相关能力，涉及海外员工报销、多语言、海外部署节点、非中国区发票识别和发票翻译"></textarea>
+            <div class="assistant-actions">
+              <button id="recommendButton" type="button">推荐 SKU</button>
+              <button class="ghost-button" id="exampleButton" type="button">填入示例</button>
+            </div>
+            <div id="assistantAnswer" class="assistant-answer"></div>
+          </div>
+        </section>
+
+        <section class="panel draft-panel">
+          <div class="panel-header">
+            <div>
+              <h2>报价草稿</h2>
+              <p>按表格录入数量、购买月份、单价和折扣率，自动计算折后总价</p>
+            </div>
+            <div class="panel-actions">
+              <button class="ghost-button" id="saveQuote" type="button">保存方案</button>
+              <button class="ghost-button" id="exportQuote" type="button">导出报价单</button>
+              <button class="ghost-button" id="clearDraft" type="button">清空草稿</button>
+            </div>
+          </div>
+
+          <div class="draft-table-wrap" id="draftList"></div>
+          <div class="empty-state" id="draftEmpty">
+            从上方选择 SKU 后，会在这里形成报价草稿和风险检查。
+          </div>
+
+          <div class="draft-toolbar">
+            <label class="quote-name-field">
+              <span>方案名称</span>
+              <input id="quoteName" type="text" placeholder="例如：某客户出海AI报价方案" />
+            </label>
+            <label>
+              <span>折扣率</span>
+              <div class="discount-control">
+                <input id="discountRate" type="number" min="0" max="100" step="1" value="100" />
+                <em>%</em>
+              </div>
+            </label>
+            <div class="draft-summary">
+              <div><small>目录总价</small><strong id="listTotal">¥0</strong></div>
+              <div><small>折后总价</small><strong id="discountedTotal">¥0</strong></div>
+            </div>
+          </div>
+          <div class="quote-feedback" id="quoteFeedback"></div>
+
+          <div class="risk-board">
+            <h3>风险检查</h3>
+            <div id="riskList" class="risk-list"></div>
+          </div>
+
+          <div class="saved-board">
+            <h3>已保存方案</h3>
+            <div id="savedQuotes" class="saved-quotes"></div>
+          </div>
+        </section>
+
+        <section class="panel rules-panel">
+          <div class="panel-header">
+            <div>
+              <h2>规则提示区</h2>
+              <p>来自 SKU 表和已确认报价口径</p>
+            </div>
+          </div>
+          <div id="rulesList" class="rules-list"></div>
+        </section>
+      </main>
+    </div>
+
+    <div class="modal-backdrop is-hidden" id="saveQuoteModal" role="dialog" aria-modal="true" aria-labelledby="saveQuoteTitle">
+      <div class="modal">
+        <div class="modal-header">
+          <h3 id="saveQuoteTitle">保存报价方案</h3>
+          <button class="danger-link" id="cancelSaveQuote" type="button">关闭</button>
+        </div>
+        <label>
+          <span>方案名称</span>
+          <input id="saveQuoteName" type="text" placeholder="例如：某客户出海AI报价方案" />
+        </label>
+        <div class="modal-actions">
+          <button class="ghost-button" id="cancelSaveQuoteBottom" type="button">取消</button>
+          <button id="confirmSaveQuote" type="button">确认保存</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="./data/sku-data.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
