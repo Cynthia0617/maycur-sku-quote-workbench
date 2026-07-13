@@ -10,6 +10,8 @@ const state = {
 };
 
 const SAVED_QUOTES_KEY = "maycur_quote_workbench_saved_quotes_personal_v2";
+const AUTH_KEY = "maycur_quote_workbench_auth_ok_v1";
+const ACCESS_PASSWORD = "Maycur2026";
 const DISCONTINUED_SKU_IDS = new Set(["SKU-N20240113"]);
 
 const els = {
@@ -45,7 +47,35 @@ const els = {
   exampleButton: document.querySelector("#exampleButton"),
   assistantAnswer: document.querySelector("#assistantAnswer"),
   rulesList: document.querySelector("#rulesList"),
+  authForm: document.querySelector("#authForm"),
+  authPassword: document.querySelector("#authPassword"),
+  authError: document.querySelector("#authError"),
 };
+
+function hasAccess() {
+  return localStorage.getItem(AUTH_KEY) === "true";
+}
+
+function unlockApp() {
+  document.body.classList.remove("auth-locked");
+}
+
+function bindAuthGate() {
+  els.authPassword?.focus();
+  els.authForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const password = String(els.authPassword.value || "").trim();
+    if (password !== ACCESS_PASSWORD) {
+      els.authError.textContent = "访问密码不正确，请重新输入。";
+      els.authPassword.select();
+      return;
+    }
+    localStorage.setItem(AUTH_KEY, "true");
+    els.authError.textContent = "";
+    unlockApp();
+    boot().catch(showLoadError);
+  });
+}
 
 function currency(value) {
   if (!Number.isFinite(value)) return "¥0";
@@ -1258,7 +1288,18 @@ async function boot() {
   bindEvents();
 }
 
-boot().catch((error) => {
+function showLoadError(error) {
   console.error(error);
   document.body.innerHTML = `<div class="empty-state">应用加载失败：${escapeHtml(error.message)}</div>`;
-});
+}
+
+function start() {
+  if (hasAccess()) {
+    unlockApp();
+    boot().catch(showLoadError);
+    return;
+  }
+  bindAuthGate();
+}
+
+start();
