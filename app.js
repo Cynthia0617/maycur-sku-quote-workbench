@@ -12,7 +12,7 @@ const state = {
 const SAVED_QUOTES_KEY = "maycur_quote_workbench_saved_quotes_personal_v2";
 const AUTH_KEY = "maycur_quote_workbench_auth_ok_v1";
 const ACCESS_PASSWORD = "Maycur2026";
-const DISCONTINUED_SKU_IDS = new Set(["SKU-N20240113"]);
+const DISCONTINUED_SKU_IDS = new Set(["SKU-N20240012", "SKU-N20240061", "SKU-N20240113"]);
 
 const els = {
   skuCount: document.querySelector("#skuCount"),
