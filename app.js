@@ -962,6 +962,15 @@ function csvCell(value) {
   return `"${String(value ?? "").replaceAll('"', '""')}"`;
 }
 
+function xmlEscape(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
 function setQuoteFeedback(html, type = "info") {
   if (!els.quoteFeedback) return;
   els.quoteFeedback.className = `quote-feedback ${type}`;
@@ -1000,6 +1009,286 @@ function openSaveQuoteModal() {
 
 function closeSaveQuoteModal() {
   els.saveQuoteModal?.classList.add("is-hidden");
+}
+
+function quoteItemsForExport(items = state.draft) {
+  return items.filter((item) => !isDiscontinuedSkuId(item.id) && draftSku(item));
+}
+
+function quoteTotalsForItems(items, discountRate) {
+  const listTotal = items.reduce((sum, item) => sum + calcDraftItem(item), 0);
+  return {
+    listTotal,
+    discountedTotal: listTotal * (Number(discountRate || 0) / 100),
+  };
+}
+
+function riskRowsForItems(items) {
+  const risks = [];
+  for (const item of items) {
+    const sku = draftSku(item);
+    if (!sku) continue;
+    if (sku.tags.includes("人工询价")) risks.push(["人工询价", `${sku.skuName} 需要按项目人工询价，请具体咨询销管人员。`]);
+    if (sku.tags.includes("需求评审")) risks.push(["需求评审", `${sku.skuName} 需要走需求评审流程确认人天或范围。`]);
+    if (sku.tags.includes("审批")) risks.push(["审批确认", `${sku.skuName} 涉及折扣、比例或最低价判断，需要业务部门领导/审批确认。`]);
+    if (sku.tags.includes("依赖提醒")) risks.push(["依赖提醒", `${sku.skuName} 有依赖项，请另选择对应 SKU 或补充确认。`]);
+    if (isGiftSku(sku)) risks.push(["赠送/0元", `${sku.skuName} 是赠送或 0 元特殊 SKU，原则上不允许赠送，需确认销售赠送口径。`]);
+  }
+  return risks.length ? risks : [["提示", "当前报价暂无明显风险标签。"]];
+}
+
+function ruleRowsForItems(items) {
+  const draftSkus = items.map(draftSku).filter(Boolean);
+  const rules = new Map();
+  const addRule = (key, type, text) => rules.set(key, [type, text]);
+
+  addRule("period", "周期口径", "新购默认 12 个月；增购/扩购按剩余月份折算，并尽量和原合同到期日对齐。");
+
+  for (const sku of draftSkus) {
+    const text = skuSearchText(sku);
+    if (/订阅|saas|云/.test(text)) addRule("saas", "部署口径", "客户 SaaS 云部署时选择订阅版 SKU；订阅费默认按年报价。");
+    if (/软件版|软件销售|本地|专属云|运维/.test(text)) {
+      addRule("local", "部署口径", "客户本地部署时选择软件版 SKU；如涉及运维费，合同额包含实施、开发、集成服务费。");
+    }
+    if (/税号|进项发票认证|销项发票管理|采购应付|发票管理|销售应收/.test(text)) {
+      addRule("tax", "税号口径", "模块报价下多个产品线合同级共赠送 10 个税号；10 个以上按对应产品线全量阶梯计算，单税号报价模式除外。");
+    }
+    if (/单个税号/.test(text)) {
+      addRule("single-tax", "单税号模式", "进项发票认证、销项发票管理如选择单个税号报价模式，不再适用模块报价默认赠送 10 个税号规则。");
+    }
+    if (sku.tags.includes("人工询价") || sku.price.kind === "inquiry") {
+      addRule("inquiry", "特殊价格", "目录价为 -、外购、硬件、托管等 SKU 需要具体咨询销管人员后人工录入。");
+    }
+    if (sku.tags.includes("需求评审") || /实施|开发|集成|人天/.test(text)) {
+      addRule("review", "需求评审", "实施、开发、集成、人天类 SKU 需要走需求评审流程确认范围和工作量。");
+    }
+    if (sku.tags.includes("审批") || /折扣|最低价|比例|赠送/.test(text) || isGiftSku(sku)) {
+      addRule("approval", "审批口径", "折扣、最低价、运维费比例、赠送或 0 元 SKU 需要业务部门领导/审批确认。");
+    }
+    if (sku.tags.includes("依赖提醒")) {
+      addRule("dependency", "依赖提醒", "当前报价含有关联依赖项，请同步补选对应 SKU 或向销管确认。");
+    }
+    if (/AI标准套件|AI审核|Token|AI发票翻译|AI/.test(sku.skuName)) {
+      addRule("ai", "AI口径", "AI 标准套件数量需与客户实际购买的账号订阅数量一致；Token、翻译流量和增值模块按对应 SKU 另计。");
+    }
+  }
+
+  return [...rules.values()];
+}
+
+function makeQuoteWorkbookRows(items, discountRate, quoteName) {
+  const exportItems = quoteItemsForExport(items);
+  const totals = quoteTotalsForItems(exportItems, discountRate);
+  const exportedAt = new Date().toLocaleString("zh-CN", { hour12: false });
+  const detailRows = [
+    ["SPU分类", "公司级产品线", "产品线", "SKU名称", "SKU编码", "数量", "购买月份", "单价", "目录价小计", "重要说明"],
+    ...exportItems.map((item) => {
+      const sku = draftSku(item);
+      return [
+        sku.spu || "",
+        sku.companyLine || "",
+        sku.productLine || "",
+        sku.skuName || "",
+        sku.skuCode || "",
+        Number(item.quantity || 0),
+        Number(item.months || 0),
+        unitPrice(item, sku),
+        calcDraftItem(item),
+        noteForDraftSku(sku),
+      ];
+    }),
+  ];
+  const summaryRows = [
+    ["字段", "内容"],
+    ["方案名称", quoteName],
+    ["导出时间", exportedAt],
+    ["SKU数量", exportItems.length],
+    ["折扣率", `${discountRate}%`],
+    ["目录总价", totals.listTotal],
+    ["折后总价", totals.discountedTotal],
+  ];
+  const riskRows = [["类型", "提示"], ...riskRowsForItems(exportItems)];
+  const ruleRows = [["规则类型", "规则说明"], ...ruleRowsForItems(exportItems)];
+  return [
+    { name: "报价明细", rows: detailRows },
+    { name: "汇总信息", rows: summaryRows },
+    { name: "风险提示", rows: riskRows },
+    { name: "规则提示", rows: ruleRows },
+  ];
+}
+
+function columnName(index) {
+  let name = "";
+  let current = index + 1;
+  while (current > 0) {
+    const remainder = (current - 1) % 26;
+    name = String.fromCharCode(65 + remainder) + name;
+    current = Math.floor((current - 1) / 26);
+  }
+  return name;
+}
+
+function worksheetXml(rows) {
+  const sheetData = rows
+    .map((row, rowIndex) => {
+      const cells = row
+        .map((value, colIndex) => {
+          const ref = `${columnName(colIndex)}${rowIndex + 1}`;
+          if (typeof value === "number" && Number.isFinite(value)) {
+            return `<c r="${ref}"><v>${value}</v></c>`;
+          }
+          return `<c r="${ref}" t="inlineStr"><is><t>${xmlEscape(value)}</t></is></c>`;
+        })
+        .join("");
+      return `<row r="${rowIndex + 1}">${cells}</row>`;
+    })
+    .join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetViews><sheetView workbookViewId="0"/></sheetViews>
+  <sheetData>${sheetData}</sheetData>
+</worksheet>`;
+}
+
+const CRC_TABLE = (() => {
+  const table = [];
+  for (let n = 0; n < 256; n += 1) {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function writeUint16(bytes, value) {
+  bytes.push(value & 0xff, (value >>> 8) & 0xff);
+}
+
+function writeUint32(bytes, value) {
+  bytes.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
+}
+
+function zipStore(files) {
+  const encoder = new TextEncoder();
+  const output = [];
+  const central = [];
+  let offset = 0;
+
+  for (const file of files) {
+    const nameBytes = encoder.encode(file.name);
+    const dataBytes = encoder.encode(file.content);
+    const crc = crc32(dataBytes);
+    const localOffset = offset;
+    const local = [];
+    writeUint32(local, 0x04034b50);
+    writeUint16(local, 20);
+    writeUint16(local, 0);
+    writeUint16(local, 0);
+    writeUint16(local, 0);
+    writeUint16(local, 0);
+    writeUint32(local, crc);
+    writeUint32(local, dataBytes.length);
+    writeUint32(local, dataBytes.length);
+    writeUint16(local, nameBytes.length);
+    writeUint16(local, 0);
+    output.push(...local, ...nameBytes, ...dataBytes);
+    offset += local.length + nameBytes.length + dataBytes.length;
+
+    const centralEntry = [];
+    writeUint32(centralEntry, 0x02014b50);
+    writeUint16(centralEntry, 20);
+    writeUint16(centralEntry, 20);
+    writeUint16(centralEntry, 0);
+    writeUint16(centralEntry, 0);
+    writeUint16(centralEntry, 0);
+    writeUint16(centralEntry, 0);
+    writeUint32(centralEntry, crc);
+    writeUint32(centralEntry, dataBytes.length);
+    writeUint32(centralEntry, dataBytes.length);
+    writeUint16(centralEntry, nameBytes.length);
+    writeUint16(centralEntry, 0);
+    writeUint16(centralEntry, 0);
+    writeUint16(centralEntry, 0);
+    writeUint16(centralEntry, 0);
+    writeUint32(centralEntry, 0);
+    writeUint32(centralEntry, localOffset);
+    central.push(...centralEntry, ...nameBytes);
+  }
+
+  const centralOffset = output.length;
+  output.push(...central);
+  const end = [];
+  writeUint32(end, 0x06054b50);
+  writeUint16(end, 0);
+  writeUint16(end, 0);
+  writeUint16(end, files.length);
+  writeUint16(end, files.length);
+  writeUint32(end, central.length);
+  writeUint32(end, centralOffset);
+  writeUint16(end, 0);
+  output.push(...end);
+  return new Uint8Array(output);
+}
+
+function buildQuoteXlsx(items = state.draft, discountRate = state.discountRate, quoteName = "未命名报价方案") {
+  const sheets = makeQuoteWorkbookRows(items, discountRate, quoteName);
+  if (sheets[0].rows.length <= 1) return null;
+  const sheetEntries = sheets.map((sheet, index) => ({
+    ...sheet,
+    id: index + 1,
+    path: `xl/worksheets/sheet${index + 1}.xml`,
+  }));
+  const workbookSheets = sheetEntries
+    .map((sheet) => `<sheet name="${xmlEscape(sheet.name)}" sheetId="${sheet.id}" r:id="rId${sheet.id}"/>`)
+    .join("");
+  const workbookRels = sheetEntries
+    .map((sheet) => `<Relationship Id="rId${sheet.id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${sheet.id}.xml"/>`)
+    .join("");
+  const sheetOverrides = sheetEntries
+    .map((sheet) => `<Override PartName="/${sheet.path}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`)
+    .join("");
+  const files = [
+    {
+      name: "[Content_Types].xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  ${sheetOverrides}
+</Types>`,
+    },
+    {
+      name: "_rels/.rels",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`,
+    },
+    {
+      name: "xl/workbook.xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>${workbookSheets}</sheets>
+</workbook>`,
+    },
+    {
+      name: "xl/_rels/workbook.xml.rels",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${workbookRels}</Relationships>`,
+    },
+    ...sheetEntries.map((sheet) => ({ name: sheet.path, content: worksheetXml(sheet.rows) })),
+  ];
+  const bytes = zipStore(files);
+  return new Blob([bytes], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
 }
 
 function buildQuoteCsv(items = state.draft, discountRate = state.discountRate) {
@@ -1051,26 +1340,42 @@ function triggerCsvDownload(csv, fileName) {
   );
 }
 
+function triggerXlsxDownload(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setQuoteFeedback(
+    `已生成 Excel 报价单：<a href="${url}" download="${escapeHtml(fileName)}" target="_blank" rel="noreferrer">点击下载 ${escapeHtml(
+      fileName
+    )}</a>`,
+    "success"
+  );
+}
+
 function exportCurrentQuote() {
-  const csv = buildQuoteCsv();
-  if (!csv) {
+  const quoteName = (els.quoteName?.value || "").trim() || "未命名报价方案";
+  const workbook = buildQuoteXlsx(state.draft, state.discountRate, quoteName);
+  if (!workbook) {
     setQuoteFeedback("请先加入 SKU 后再导出报价单。", "warning");
     return;
   }
-  const quoteName = (els.quoteName?.value || "").trim() || "未命名报价方案";
-  const fileName = `${safeFileName(quoteName)}-${exportTimestamp()}.csv`;
-  triggerCsvDownload(csv, fileName);
+  const fileName = `${safeFileName(quoteName)}-${exportTimestamp()}.xlsx`;
+  triggerXlsxDownload(workbook, fileName);
 }
 
 function exportSavedQuote(id) {
   const quote = state.savedQuotes.find((item) => item.id === id);
   if (!quote) return;
-  const csv = buildQuoteCsv(quote.items, quote.discountRate);
-  if (!csv) {
+  const workbook = buildQuoteXlsx(quote.items, quote.discountRate, quote.name);
+  if (!workbook) {
     setQuoteFeedback("该保存方案没有可导出的 SKU。", "warning");
     return;
   }
-  triggerCsvDownload(csv, `${safeFileName(quote.name)}-${exportTimestamp()}.csv`);
+  triggerXlsxDownload(workbook, `${safeFileName(quote.name)}-${exportTimestamp()}.xlsx`);
 }
 
 function recommendSkus() {
